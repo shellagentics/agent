@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
+#
+# agen - Unix-native AI agent CLI
+#
+# A CLI tool that brings AI agents into Unix pipelines. Agents compose
+# with other tools rather than replacing the shell.
+#
+# Usage:
+#   agen "Explain Unix pipes"
+#   cat error.log | agen "diagnose this error"
+#   echo "summarize" | agen
+#
+# Configuration:
+#   Set AGEN_BACKEND env var:
+#     AGEN_BACKEND=claude-code   # uses Claude Code CLI (Max subscription)
+#     AGEN_BACKEND=llm           # uses llm CLI (API costs)
+#     AGEN_BACKEND=api           # uses direct Anthropic API (API costs)
+#     AGEN_BACKEND=auto          # auto-detect (default)
+#
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 DEFAULT_MODEL="claude-sonnet-4-20250514"
 
 # Exit codes as named constants
@@ -9,6 +27,10 @@ EXIT_SUCCESS=0
 EXIT_FAILURE=1
 EXIT_NEEDS_INPUT=2
 EXIT_LIMIT=3
+
+# =============================================================================
+# HELP AND VERSION
+# =============================================================================
 
 show_help() {
   cat <<'EOF'
@@ -25,15 +47,19 @@ DESCRIPTION
 OPTIONS
   --help              Show this help message
   --version           Show version
+  --backend=BACKEND   LLM backend: claude-code, llm, api, auto (default: auto)
+  --model=MODEL       Model to use (default: claude-sonnet-4-20250514)
+  --system=FILE       System prompt file to prepend
+  --verbose           Debug output on stderr
+
+  Not yet implemented:
   --batch             No interactive prompts; exit 2 if input needed
   --json              Output JSON instead of plain text
   --state=FILE        State file for persistence/resume
   --resume            Continue from state file
   --checkpoint        Save state after completion
   --max-turns=N       Maximum agentic loop iterations (default: 1)
-  --tools=LIST        Tools to enable (default: none). Available: bash
-  --model=MODEL       Model to use (default: claude-sonnet-4-20250514)
-  --verbose           Debug output on stderr
+  --tools=LIST        Tools to enable (default: none)
 
 EXIT CODES
   0   SUCCESS       Task completed
@@ -48,15 +74,31 @@ EXAMPLES
   # Pipeline usage
   cat error.log | agen "diagnose this error"
 
-  # Stateful conversation
-  agen --state=chat.json "Start a new project"
-  agen --state=chat.json --resume "Add tests"
+  # Chain agents
+  cat data.csv | agen "summarize" | agen "format as markdown"
 
-  # Agentic mode
-  agen --tools=bash --max-turns=5 "Create a hello world script"
+  # With system prompt
+  agen --system=SYSTEM.md "process this task"
+
+  # Specific backend
+  agen --backend=claude-code "explain this"
 
 ENVIRONMENT
-  ANTHROPIC_API_KEY   Required. Your Anthropic API key.
+  AGEN_BACKEND        Backend to use (claude-code, llm, api, auto)
+  ANTHROPIC_API_KEY   Required for api backend
+  LLM_MODEL           Model override for llm backend
+
+BACKENDS
+  claude-code   Uses Claude Code CLI in print mode. Requires 'claude' command.
+                Best for Max subscription users (no API costs).
+
+  llm           Uses Simon Willison's llm CLI. Requires 'llm' command.
+                Install: pip install llm
+
+  api           Direct Anthropic API calls. Requires ANTHROPIC_API_KEY.
+                Uses curl and jq.
+
+  auto          Try claude-code, then llm, then api. (default)
 
 EOF
 }
@@ -65,18 +107,171 @@ show_version() {
   echo "agen $VERSION"
 }
 
+# =============================================================================
+# UTILITIES
+# =============================================================================
+
 die() {
   echo "agen: $*" >&2
   exit $EXIT_FAILURE
 }
 
-# Main argument parsing
-main() {
-  # Handle no arguments
-  if [[ $# -eq 0 ]]; then
-    die "No prompt provided. Use --help for usage."
+verbose() {
+  if [[ "${VERBOSE:-}" == "1" ]]; then
+    echo "agen: $*" >&2
+  fi
+}
+
+# Detect if data is being piped to stdin
+has_stdin() {
+  [[ -t 0 ]] && return 1 || return 0
+}
+
+# =============================================================================
+# LLM BACKENDS
+# =============================================================================
+
+# Claude Code CLI backend (uses Max subscription, no API costs)
+call_claude_code() {
+  local prompt="$1"
+
+  if ! command -v claude &>/dev/null; then
+    die "claude CLI not found. Install Claude Code: https://claude.ai/code"
   fi
 
+  verbose "Using claude-code backend"
+  echo "$prompt" | claude -p --output-format text
+}
+
+# Simon Willison's llm CLI
+call_llm_cli() {
+  local prompt="$1"
+
+  if ! command -v llm &>/dev/null; then
+    die "llm CLI not found. Install: pip install llm"
+  fi
+
+  verbose "Using llm backend with model ${LLM_MODEL:-$DEFAULT_MODEL}"
+  echo "$prompt" | llm -m "${LLM_MODEL:-claude-sonnet-4-20250514}"
+}
+
+# Direct Anthropic API
+call_anthropic_api() {
+  local prompt="$1"
+
+  if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    die "ANTHROPIC_API_KEY not set"
+  fi
+
+  if ! command -v jq &>/dev/null; then
+    die "jq not found. Install jq for API backend."
+  fi
+
+  verbose "Using api backend with model $MODEL"
+
+  local response
+  response=$(curl -s https://api.anthropic.com/v1/messages \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: $ANTHROPIC_API_KEY" \
+    -H "anthropic-version: 2023-06-01" \
+    -d "$(jq -n \
+      --arg prompt "$prompt" \
+      --arg model "$MODEL" \
+      '{
+        model: $model,
+        max_tokens: 4096,
+        messages: [{role: "user", content: $prompt}]
+      }')")
+
+  echo "$response" | jq -r '.content[0].text // .error.message // "Unknown error"'
+}
+
+# Dispatch to configured backend
+call_llm() {
+  local prompt="$1"
+  local backend="${BACKEND:-auto}"
+
+  case "$backend" in
+    claude-code|cc)
+      call_claude_code "$prompt"
+      ;;
+    llm)
+      call_llm_cli "$prompt"
+      ;;
+    api)
+      call_anthropic_api "$prompt"
+      ;;
+    auto)
+      if command -v claude &>/dev/null; then
+        call_claude_code "$prompt"
+      elif command -v llm &>/dev/null; then
+        call_llm_cli "$prompt"
+      elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        call_anthropic_api "$prompt"
+      else
+        die "No backend available. Install claude CLI, llm CLI, or set ANTHROPIC_API_KEY"
+      fi
+      ;;
+    *)
+      die "Unknown backend: $backend (use: claude-code, llm, api, auto)"
+      ;;
+  esac
+}
+
+# =============================================================================
+# PROMPT CONSTRUCTION
+# =============================================================================
+
+build_prompt() {
+  local task="$1"
+  local stdin_content="$2"
+  local system_file="$3"
+
+  # Layer 1: System prompt (if provided)
+  if [[ -n "$system_file" ]] && [[ -f "$system_file" ]]; then
+    cat "$system_file"
+    echo ""
+    echo "---"
+    echo ""
+  fi
+
+  # Layer 2: Input document (if piped)
+  if [[ -n "$stdin_content" ]]; then
+    echo "## Input"
+    echo ""
+    echo "$stdin_content"
+    echo ""
+    echo "---"
+    echo ""
+  fi
+
+  # Layer 3: Task
+  echo "## Task"
+  echo ""
+  echo "$task"
+}
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+main() {
+  # Defaults
+  BACKEND="${AGEN_BACKEND:-auto}"
+  MODEL="$DEFAULT_MODEL"
+  SYSTEM_FILE=""
+  VERBOSE=""
+
+  local prompt_args=()
+  local stdin_content=""
+
+  # Read stdin FIRST if available (before argument parsing)
+  if has_stdin; then
+    stdin_content="$(cat)"
+    verbose "Read $(echo "$stdin_content" | wc -c | tr -d ' ') bytes from stdin"
+  fi
+
+  # Parse arguments
   while [[ $# -gt 0 ]]; do
     case $1 in
       --help)
@@ -87,23 +282,64 @@ main() {
         show_version
         exit $EXIT_SUCCESS
         ;;
-      --batch|--json|--resume|--checkpoint|--verbose)
-        # Flags recognized but not yet implemented
+      --verbose)
+        VERBOSE=1
+        shift
+        ;;
+      --backend=*)
+        BACKEND="${1#*=}"
+        shift
+        ;;
+      --model=*)
+        MODEL="${1#*=}"
+        shift
+        ;;
+      --system=*)
+        SYSTEM_FILE="${1#*=}"
+        if [[ ! -f "$SYSTEM_FILE" ]]; then
+          die "System file not found: $SYSTEM_FILE"
+        fi
+        shift
+        ;;
+      --batch|--json|--resume|--checkpoint)
         die "Option $1 not yet implemented"
         ;;
-      --state=*|--max-turns=*|--tools=*|--model=*)
-        # Options with values recognized but not yet implemented
+      --state=*|--max-turns=*|--tools=*)
         die "Option ${1%%=*} not yet implemented"
         ;;
       --*)
         die "Unknown option: $1"
         ;;
       *)
-        # Positional argument (prompt)
-        die "Not yet implemented"
+        # Positional argument (part of prompt)
+        prompt_args+=("$1")
+        shift
         ;;
     esac
   done
+
+  # Build task from positional arguments
+  local task=""
+  if [[ ${#prompt_args[@]} -gt 0 ]]; then
+    task="${prompt_args[*]}"
+  elif [[ -n "$stdin_content" ]]; then
+    # Stdin but no explicit task
+    task="Process this input."
+  fi
+
+  if [[ -z "$task" ]]; then
+    die "No prompt provided. Use --help for usage."
+  fi
+
+  verbose "Task: $task"
+  verbose "Backend: $BACKEND"
+  verbose "Model: $MODEL"
+
+  # Build and execute
+  local full_prompt
+  full_prompt="$(build_prompt "$task" "$stdin_content" "$SYSTEM_FILE")"
+
+  call_llm "$full_prompt"
 }
 
 main "$@"

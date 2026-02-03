@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# ship - Commit checkpoint with semantic README check
+#
+# A skill that uses agen to verify documentation before committing.
+# This is Vision B in action: the shell orchestrates, agen is a tool.
+#
+# Usage:
+#   ./skills/ship              # from repo root
+#   ./skills/ship "message"    # with custom commit message
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGEN="${SCRIPT_DIR}/../agen"
+
+die() {
+  echo "ship: $*" >&2
+  exit 1
+}
+
+# Ensure we're in a git repo
+git rev-parse --git-dir > /dev/null 2>&1 || die "Not in a git repository"
+
+# Check for staged changes
+staged=$(git diff --cached --name-only)
+if [[ -z "$staged" ]]; then
+  # Nothing staged, try to stage all changes
+  changes=$(git status --porcelain)
+  if [[ -z "$changes" ]]; then
+    echo "ship: Nothing to commit"
+    exit 0
+  fi
+  echo "ship: No staged changes. Stage with 'git add' first."
+  exit 1
+fi
+
+echo "ship: Checking staged changes..."
+
+# Identify code vs docs
+code_files=$(echo "$staged" | grep -vE '\.(md|txt|json)$|^\.gitignore$|^\.' || true)
+readme_staged=$(echo "$staged" | grep -q '^README\.md$' && echo "yes" || true)
+
+# If code changed but no README, ask agen if it matters
+if [[ -n "$code_files" ]] && [[ -z "$readme_staged" ]]; then
+  echo "ship: Code changed without README. Checking if update needed..."
+
+  diff_content=$(git diff --cached)
+
+  # Create a temporary system prompt file
+  system_prompt=$(mktemp)
+  trap 'rm -f "$system_prompt"' EXIT
+
+  cat > "$system_prompt" << 'EOF'
+You are a documentation reviewer. Be concise.
+Only say YES if the changes affect user-facing behavior, API, installation, or usage.
+Internal refactors, bug fixes, and minor tweaks usually don't need README updates.
+EOF
+
+  # Ask agen to evaluate
+  analysis=$(echo "$diff_content" | "$AGEN" --system="$system_prompt" \
+    "Does README.md need updating for these changes? Reply YES or NO, then explain briefly.") \
+    || die "agen failed"
+
+  if echo "$analysis" | head -1 | grep -qi "^YES"; then
+    echo ""
+    echo "ship: README update recommended:"
+    echo "$analysis" | tail -n +2
+    echo ""
+    echo "ship: Update README.md and stage it, or run with --force to skip."
+    exit 1
+  else
+    echo "ship: README update not needed."
+  fi
+fi
+
+# Build commit message
+if [[ $# -gt 0 ]]; then
+  message="$*"
+else
+  # Generate a message from the diff
+  file_count=$(echo "$staged" | wc -l | tr -d ' ')
+  first_file=$(echo "$staged" | head -1)
+  if [[ "$file_count" == "1" ]]; then
+    message="Update $first_file"
+  else
+    message="Update $file_count files"
+  fi
+fi
+
+# Commit
+git commit -m "$message"
+
+# Report
+echo ""
+echo "ship: Committed."
+git log --oneline -1
+echo ""
+
+# Show status relative to remote
+ahead=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo "?")
+echo "ship: $ahead commit(s) ahead of origin"
