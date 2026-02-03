@@ -154,22 +154,18 @@ This is the Unix way: stdin/stdout/stderr, composable with pipes, scriptable.
 
 ## Skills
 
-Skills are shell scripts that orchestrate agen for specific workflows.
+Skills are shell scripts that orchestrate agen for specific workflows. Unlike prompt-based skills (Vision A), these are **programs that use the agent**.
 
-```bash
-./skills/ship              # commit with README check
-./skills/review            # code review staged changes
-git diff | ./skills/review # review piped diff
-```
+See [agen-skills](https://github.com/markreveley/agen-skills) for a collection of ready-to-use skills.
 
-Unlike prompt-based skills (Vision A), these are **programs that use the agent**:
+### The Pattern
 
 ```bash
 #!/usr/bin/env bash
 # A skill is just a script that calls agen
 
 diff=$(git diff --cached)
-result=$(echo "$diff" | ./agen --system=reviewer.md "review this")
+result=$(echo "$diff" | agen --system=reviewer.md "review this")
 
 if echo "$result" | grep -q "CRITICAL"; then
   echo "Blocking issues found"
@@ -177,7 +173,7 @@ if echo "$result" | grep -q "CRITICAL"; then
 fi
 ```
 
-See `skills/README.md` for the pattern.
+The shell orchestrates. agen is one tool among many.
 
 ## License
 
