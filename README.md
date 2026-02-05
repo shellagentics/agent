@@ -2,15 +2,17 @@
 
 ## What Is This?
 
-`agen` is to LLM inference what `curl` is to HTTP: a request primitive. It sends a prompt to an LLM and emits the response to stdout. Part of the `agen-*` toolkit — small programs that compose via pipes and text streams to build larger agentic structures.
-
-**Why shell primitives?** The Unix philosophy — small tools that do one thing, work together via text streams, and remain inspectable — scales. The `agen-*` suite applies this to AI agents: instead of opaque frameworks, you get composable programs that work with `grep`, `jq`, `cron`, and everything else you already know.
+`agen` is to LLM inference what `curl` is to HTTP: a request primitive. It sends a prompt to an LLM and emits the response to stdout. This is infrastructure for [Unix Agentics](https://stratta.dev) — the thesis that agents should be files, processes, and streams, not chat interfaces.
 
 ```bash
 cat error.log | agen "diagnose" | agen "suggest fix" > recommendations.md
 ```
 
-This is infrastructure for [Unix Agentics](https://stratta.dev) — the thesis that agents should be files, processes, and streams, not chat interfaces.
+## Shell Agentics
+
+Part of the [Shell Agentics](https://github.com/shellagentics) toolkit - small programs that compose via pipes and text streams to build larger agentic structures using Unix primitives. No frameworks. No magic. Total observability.
+
+When you or another agent want to know what an agent did, you check the execution trace. Every command, every decision, every timestamp is inspectable with Unix tools. It's all Unix and it's all in the shell.
 
 ## Installation
 
