@@ -25,8 +25,6 @@ DEFAULT_MODEL="claude-sonnet-4-20250514"
 # Exit codes as named constants
 EXIT_SUCCESS=0
 EXIT_FAILURE=1
-EXIT_NEEDS_INPUT=2
-EXIT_LIMIT=3
 
 # =============================================================================
 # HELP AND VERSION
@@ -53,20 +51,9 @@ OPTIONS
   --system-file=FILE  System prompt file to prepend
   --verbose           Debug output on stderr
 
-  Not yet implemented:
-  --batch             No interactive prompts; exit 2 if input needed
-  --json              Output JSON instead of plain text
-  --state=FILE        State file for persistence/resume
-  --resume            Continue from state file
-  --checkpoint        Save state after completion
-  --max-turns=N       Maximum agentic loop iterations (default: 1)
-  --tools=LIST        Tools to enable (default: none)
-
 EXIT CODES
   0   SUCCESS       Task completed
   1   FAILURE       Error occurred
-  2   NEEDS_INPUT   Human input required (batch mode)
-  3   LIMIT         Hit max-turns
 
 EXAMPLES
   # Simple query
@@ -155,8 +142,8 @@ call_llm_cli() {
     die "llm CLI not found. Install: pip install llm"
   fi
 
-  verbose "Using llm backend with model ${LLM_MODEL:-$DEFAULT_MODEL}"
-  echo "$prompt" | llm -m "${LLM_MODEL:-claude-sonnet-4-20250514}"
+  verbose "Using llm backend with model ${LLM_MODEL:-$MODEL}"
+  echo "$prompt" | llm -m "${LLM_MODEL:-$MODEL}"
 }
 
 # Direct Anthropic API
@@ -326,12 +313,6 @@ main() {
           die "System file not found: $SYSTEM_FILE"
         fi
         shift 2
-        ;;
-      --batch|--json|--resume|--checkpoint)
-        die "Option $1 not yet implemented"
-        ;;
-      --state=*|--max-turns=*|--tools=*)
-        die "Option ${1%%=*} not yet implemented"
         ;;
       --*)
         die "Unknown option: $1"

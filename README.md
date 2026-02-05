@@ -17,7 +17,7 @@ When you or another agent want to know what an agent did, you check the executio
 ## Installation
 
 ```bash
-git clone https://github.com/markreveley/agen.git
+git clone https://github.com/shellagentics/agen.git
 cd agen
 ./agen --help
 ```
@@ -72,20 +72,15 @@ command | agen [OPTIONS] [PROMPT]
 | `--version` | Show version |
 | `--backend=BACKEND` | LLM backend: claude-code, llm, api, auto |
 | `--model=MODEL` | Model to use (default: claude-sonnet-4-20250514) |
-| `--system=FILE` | System prompt file to prepend |
+| `--system=STRING` | Inline system prompt |
+| `--system-file=FILE` | System prompt from file |
 | `--verbose` | Debug output on stderr |
 
-### Planned Options (not yet implemented)
+### Design: Single-Shot by Choice
 
-| Option | Description |
-|--------|-------------|
-| `--batch` | No interactive prompts; exit 2 if input needed |
-| `--json` | Output JSON instead of plain text |
-| `--state=FILE` | State file for persistence/resume |
-| `--resume` | Continue from state file |
-| `--checkpoint` | Save state after completion |
-| `--max-turns=N` | Maximum agentic loop iterations |
-| `--tools=LIST` | Tools to enable (agentic mode) |
+agen is deliberately a single-shot primitive: prompt in, response out. It does not implement tool-calling loops, state management, or multi-turn conversations. This is an architectural commitment, not a limitation.
+
+In Shell Agentics, the orchestrating script controls the loop. The LLM is an oracle — it answers questions, it doesn't make decisions about tool use. Decisions live in auditable shell scripts. This provides a fundamentally different security posture: the LLM can suggest whatever it wants, but the skill script is the gatekeeper. See [shellclaw](https://github.com/shellagentics/shellclaw) for how this works in practice.
 
 ### Exit Codes
 
@@ -93,8 +88,6 @@ command | agen [OPTIONS] [PROMPT]
 |------|---------|--------------|
 | 0 | Success | `agen && echo "done"` |
 | 1 | Failure | `agen \|\| echo "failed"` |
-| 2 | Needs input | Retry with more context |
-| 3 | Hit limit | Increase --max-turns |
 
 ## Examples
 
@@ -117,12 +110,11 @@ cat data.csv | agen "summarize" | agen "format as markdown" > summary.md
 ### With System Prompt
 
 ```bash
-# Create a domain-specific agent
-cat > SYSTEM.md << 'EOF'
-You are a code reviewer. Be concise and focus on bugs.
-EOF
+# Inline system prompt
+git diff | agen --system="You are a code reviewer. Be concise." "review these changes"
 
-git diff | agen --system=SYSTEM.md "review these changes"
+# System prompt from file (for agent soul files)
+git diff | agen --system-file=SYSTEM.md "review these changes"
 ```
 
 ### Scripting
@@ -141,9 +133,9 @@ fi
 agen constructs a prompt from layers:
 
 ```
-┌─────────────────────────────────┐
-│ System prompt (--system=FILE)  │  ← Identity, rules
-├─────────────────────────────────┤
+┌─────────────────────────────────────┐
+│ System prompt (--system/--system-file) │  ← Identity, rules
+├─────────────────────────────────────┤
 │ Input (stdin if piped)         │  ← Material to process
 ├─────────────────────────────────┤
 │ Task (positional arguments)    │  ← What to do
@@ -158,7 +150,7 @@ This is the Unix way: stdin/stdout/stderr, composable with pipes, scriptable.
 
 Skills are shell scripts that orchestrate agen for specific workflows. Unlike prompt-based skills (Vision A), these are **programs that use the agent**.
 
-See [agen-skills](https://github.com/markreveley/agen-skills) for a collection of ready-to-use skills.
+See [agen-skills](https://github.com/shellagentics/agen-skills) for a collection of ready-to-use skills.
 
 ### The Pattern
 

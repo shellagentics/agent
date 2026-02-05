@@ -51,7 +51,6 @@ test_output_contains() {
   set +e
   local output
   output=$("$@" 2>&1)
-  local exit_code=$?
   set -e
 
   if echo "$output" | grep -q "$pattern"; then
@@ -73,7 +72,7 @@ test_output_contains "--help contains SYNOPSIS" "SYNOPSIS" "$AGEN" --help
 test_output_contains "--help contains OPTIONS" "OPTIONS" "$AGEN" --help
 
 test_case "--version exits 0" 0 "$AGEN" --version
-test_output_contains "--version contains version number" "0.2.0" "$AGEN" --version
+test_output_contains "--version contains version number" "0.3.0" "$AGEN" --version
 
 test_case "no arguments exits 1" 1 "$AGEN"
 test_case "prompt without implementation exits 1" 1 "$AGEN" "anything"
