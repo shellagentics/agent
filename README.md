@@ -10,9 +10,7 @@ cat error.log | agen "diagnose" | agen "suggest fix" > recommendations.md
 
 ## Shell Agentics
 
-Part of the [Shell Agentics](https://github.com/shellagentics) toolkit - small programs that compose via pipes and text streams to build larger agentic structures using Unix primitives. No frameworks. No magic. Total observability.
-
-When you or another agent want to know what an agent did, you check the execution trace. Every command, every decision, every timestamp is inspectable with Unix tools. It's all Unix and it's all in the shell.
+Part of the [Shell Agentics](https://github.com/shellagentics/shell-agentics) toolkit - small programs that compose via pipes and text streams to build larger agentic structures using Unix primitives. No frameworks. No magic. Total observability.
 
 ## Installation
 
