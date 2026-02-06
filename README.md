@@ -2,7 +2,7 @@
 
 ## What Is This?
 
-`agent` is to LLM inference what `curl` is to HTTP: a request primitive. It sends a prompt to an LLM and emits the response to stdout. This is infrastructure for [Unix Agentics](https://stratta.dev) — the thesis that agents should be files, processes, and streams, not chat interfaces.
+`agent` is a Unix primitive for LLM inference — stdin in, stdout out, nothing else. `agent` is to LLM inference what `curl` is to HTTP: a request primitive. It sends a prompt to an LLM and emits the response to stdout. This is infrastructure for [Shell Agentics](https://github.com/shellagentics/shell-agentics) — the thesis that agents should be files, processes, and streams, not chat interfaces.
 
 ```bash
 cat error.log | agent "diagnose" | agent "suggest fix" > recommendations.md
@@ -77,9 +77,33 @@ command | agent [OPTIONS] [PROMPT]
 
 ### Design: Single-Shot by Choice
 
-agent is deliberately a single-shot primitive: prompt in, response out. It does not implement tool-calling loops, state management, or multi-turn conversations. This is an architectural commitment, not a limitation.
+agent is deliberately a single-shot primitive: prompt in, response out. It does not implement tool-calling loops, state management, or multi-turn conversations. This is an architectural commitment rooted in observability and control flow legibility.
 
-In Shell Agentics, the orchestrating script controls the loop. The LLM is an oracle — it answers questions, it doesn't make decisions about tool use. Decisions live in auditable shell scripts. This provides a fundamentally different security posture: the LLM can suggest whatever it wants, but the orchestrating script is the gatekeeper. See [shellclaw](https://github.com/shellagentics/shellclaw) for how this works in practice.
+#### How most agent frameworks handle tool calling
+
+You define tools as JSON schemas and send them alongside a prompt. The LLM may respond with structured tool-call requests — JSON specifying the tool name and arguments. The framework's dispatch loop executes the requested tool, feeds the result back into the conversation context, and calls the LLM again. This continues until the LLM responds with text instead of a tool call. The tool-calling loop, the dispatch logic, and the execution sequence all live inside the framework process.
+
+#### How Shell Agentics handles tool calling
+
+The orchestrating script calls `agent` to get a response. When the LLM returns a structured tool-call request (JSON with a tool name and arguments), the script parses it and matches the tool name against a `case` statement — an explicit allowlist of permitted tools. Only tools listed in the `case` execute. Unmatched requests fall through. This is default-deny dispatch.
+
+```bash
+case "$tool" in
+  ping)    result=$("$TOOLS_DIR/ping.sh" "$args") ;;
+  curl)    result=$("$TOOLS_DIR/curl.sh" "$args") ;;
+  *)       result="Tool not permitted: $tool" ;;
+esac
+```
+
+#### Observability and control flow legibility
+
+This architecture provides two complementary properties.
+
+**Observability.** Every tool invocation is a visible line in the script. The execution trace — which tools ran, with what arguments, in what order — is available through standard Unix mechanisms: `set -x` traces every command, [`alog`](https://github.com/shellagentics/alog) records structured events, process output flows through pipes. Logging, conditional pauses, and additional checks can be inserted between any steps.
+
+**Control flow legibility.** The script is a readable artifact that exists before runtime. `cat agent-1.sh` shows every tool that could run and under what conditions. The `case` statement is auditable as a specification — you can read it and know with certainty which tools are permitted. This legibility is diffable, git-blameable, and reviewable in a pull request. It describes what *can* happen, not just what *did* happen.
+
+When the agentic loop lives in the shell script, both properties are present: you can observe what happened, and you can read what can happen. See [shellclaw/agents/agent-1.sh](https://github.com/shellagentics/shellclaw/blob/main/agents/agent-1.sh) for the pattern.
 
 ### Exit Codes
 
@@ -169,10 +193,7 @@ agent/
 ├── test.sh             # Test suite
 ├── README.md           # This file
 ├── DEVLOG.md           # Development notes and decisions
-├── CLAUDE.md           # AI assistant guide
-└── prompts/            # Versioned prompts
-    ├── README.md       # Prompt versioning guide
-    └── BUILD_PROMPT.md # Build specification (v1.0.0)
+└── CLAUDE.md           # AI assistant guide (coding conventions)
 ```
 
 ## License
